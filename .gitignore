@@ -1,0 +1,11 @@
+.build/
+.swiftpm/
+dist/
+releases/
+*.xcodeproj
+xcuserdata/
+.DS_Store
+logs/
+*.log
+Resources/bin/
+
