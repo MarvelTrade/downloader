@@ -8,6 +8,8 @@
 	<string>M24 VK Downloader</string>
 	<key>CFBundleExecutable</key>
 	<string>M24VKDownloader</string>
+	<key>CFBundleIconFile</key>
+	<string>M24VKDownloader</string>
 	<key>CFBundleIdentifier</key>
 	<string>ru.m24.vkdownloader</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -17,9 +19,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.2.1</string>
+	<string>1.3.0</string>
 	<key>CFBundleVersion</key>
-	<string>4</string>
+	<string>5</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.utilities</string>
 	<key>LSArchitecturePriority</key>

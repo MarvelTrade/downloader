@@ -9,7 +9,7 @@ enum YTDLPUpdater {
 
     private static let latestPageURL = URL(string: "https://github.com/yt-dlp/yt-dlp/releases/latest")!
     private static let latestBinaryURL = URL(string: "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos")!
-    private static let userAgent = "M24VKDownloader/1.2.1"
+    private static let userAgent = "M24VKDownloader/1.3.0"
 
     static func checkAndUpdate(currentVersion: String, force: Bool) async -> Result {
         do {
