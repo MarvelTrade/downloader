@@ -5,6 +5,7 @@ import Foundation
 @MainActor
 final class AppViewModel: ObservableObject {
     @Published var urlText = ""
+    @Published var downloadThumbnail = false
     @Published var jobs: [DownloadJob] = []
     @Published var history: [HistoryItem] = []
     @Published var saveFolder: URL
@@ -64,16 +65,17 @@ final class AppViewModel: ObservableObject {
     func addToQueue() {
         let raw = urlText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return }
-        guard URLValidator.isVKVideoURL(raw), let normalized = URLValidator.normalizedURL(from: raw) else {
+        guard let source = URLValidator.source(from: raw),
+              let normalized = URLValidator.normalizedURL(from: raw) else {
             urlError = DownloadError.invalidURL.localizedDescription
             return
         }
         urlError = nil
-        let job = DownloadJob(url: normalized.absoluteString)
+        let job = DownloadJob(url: normalized.absoluteString, downloadThumbnail: downloadThumbnail)
         jobs.append(job)
         persistQueue()
         urlText = ""
-        DebugLog.info("Queued \(normalized.absoluteString)")
+        DebugLog.info("Queued \(source.displayName) URL: \(normalized.absoluteString)")
         startProcessorIfNeeded()
     }
 
@@ -119,9 +121,25 @@ final class AppViewModel: ObservableObject {
     }
 
     func reveal(url: URL) {
-        if FileManager.default.fileExists(atPath: url.path) {
-            NSWorkspace.shared.activateFileViewerSelecting([url])
+        let file = url.standardizedFileURL
+        let parent = file.deletingLastPathComponent()
+        if FileManager.default.fileExists(atPath: file.path) {
+            let selected = NSWorkspace.shared.selectFile(file.path, inFileViewerRootedAtPath: parent.path)
+            if !selected { NSWorkspace.shared.open(parent) }
+        } else if FileManager.default.fileExists(atPath: parent.path) {
+            NSWorkspace.shared.open(parent)
+            updateMessage = "Файл был перемещён или удалён; открыта папка сохранения."
+        } else {
+            NSWorkspace.shared.open(saveFolder)
+            updateMessage = "Старая папка не найдена; открыта текущая папка сохранения."
         }
+    }
+
+    func openSaveFolder() {
+        if !FileManager.default.fileExists(atPath: saveFolder.path) {
+            try? FileManager.default.createDirectory(at: saveFolder, withIntermediateDirectories: true)
+        }
+        NSWorkspace.shared.open(saveFolder)
     }
 
     func clearHistory() {
@@ -186,7 +204,8 @@ final class AppViewModel: ObservableObject {
                 videoURL: job.url,
                 destinationFolder: saveFolder,
                 binaries: binaries,
-                session: session
+                session: session,
+                downloadThumbnail: job.downloadThumbnail
             ) { [weak self] event in
                 Task { @MainActor in
                     self?.handle(event, jobID: job.id)
@@ -261,6 +280,10 @@ final class AppViewModel: ObservableObject {
                 if let percent = snapshot.percent { item.progress = percent }
                 if let speed = snapshot.speed { item.speed = speed }
                 if let eta = snapshot.eta { item.eta = eta }
+            }
+        case .fileSize(let size):
+            updateJob(id: jobID) { item in
+                item.fileSize = size
             }
         case .log(let chunk):
             DebugLog.raw(chunk)

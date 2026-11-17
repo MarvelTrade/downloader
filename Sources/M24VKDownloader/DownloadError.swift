@@ -5,7 +5,9 @@ enum DownloadError: LocalizedError {
     case ffmpegNotFound
     case invalidURL
     case videoUnavailable
-    case vkAuthRequired
+    case authRequired
+    case networkError
+    case sourceUnavailable
     case downloadFailed
     case diskFull
     case emptyResult
@@ -18,13 +20,17 @@ enum DownloadError: LocalizedError {
         case .ffmpegNotFound:
             return "Не удалось найти ffmpeg"
         case .invalidURL:
-            return "Некорректная ссылка"
+            return "Ссылка не поддерживается"
         case .videoUnavailable:
             return "Видео недоступно"
-        case .vkAuthRequired:
-            return "Для этого видео требуется авторизация VK"
+        case .authRequired:
+            return "Для этого видео требуется авторизация"
+        case .networkError:
+            return "Ошибка сети"
+        case .sourceUnavailable:
+            return "Источник временно не отвечает"
         case .downloadFailed:
-            return "Ошибка загрузки"
+            return "Не удалось получить видеопоток"
         case .diskFull:
             return "Недостаточно места на диске"
         case .emptyResult:

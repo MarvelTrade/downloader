@@ -15,7 +15,7 @@ struct SettingsView: View {
 
             GroupBox("Версии") {
                 VStack(alignment: .leading, spacing: 8) {
-                    labeled("M24VKDownloader", AppPaths.appVersion)
+                    labeled("Загрузчик", AppPaths.appVersion)
                     labeled("Архитектура", HostArchitecture.displayName)
                     labeled("yt-dlp", model.ytdlpVersion)
                     labeled("ffmpeg", firstLine(model.ffmpegVersion))

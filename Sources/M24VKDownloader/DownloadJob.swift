@@ -28,6 +28,21 @@ enum JobStatus: String, Codable, Equatable {
         case .cancelled: return "Отменено"
         }
     }
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        switch raw {
+        case "resolving": self = .waiting
+        case "alreadyExists": self = .completed
+        case "pdfUnavailable": self = .failed
+        default: self = JobStatus(rawValue: raw) ?? .failed
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 struct DownloadJob: Identifiable, Codable, Equatable {
@@ -42,6 +57,8 @@ struct DownloadJob: Identifiable, Codable, Equatable {
     var errorMessage: String?
     var createdAt: Date
     var finishedAt: Date?
+    var downloadThumbnail: Bool
+    var fileSize: Int64?
 
     init(
         id: UUID = UUID(),
@@ -54,7 +71,9 @@ struct DownloadJob: Identifiable, Codable, Equatable {
         outputPath: String? = nil,
         errorMessage: String? = nil,
         createdAt: Date = Date(),
-        finishedAt: Date? = nil
+        finishedAt: Date? = nil,
+        downloadThumbnail: Bool = false,
+        fileSize: Int64? = nil
     ) {
         self.id = id
         self.url = url
@@ -67,11 +86,45 @@ struct DownloadJob: Identifiable, Codable, Equatable {
         self.errorMessage = errorMessage
         self.createdAt = createdAt
         self.finishedAt = finishedAt
+        self.downloadThumbnail = downloadThumbnail
+        self.fileSize = fileSize
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, url, title, status, progress, speed, eta, outputPath, errorMessage
+        case createdAt, finishedAt, downloadThumbnail, fileSize
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        url = try container.decode(String.self, forKey: .url)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        status = try container.decode(JobStatus.self, forKey: .status)
+        progress = try container.decodeIfPresent(Double.self, forKey: .progress)
+        speed = try container.decodeIfPresent(String.self, forKey: .speed)
+        eta = try container.decodeIfPresent(String.self, forKey: .eta)
+        outputPath = try container.decodeIfPresent(String.self, forKey: .outputPath)
+        errorMessage = try container.decodeIfPresent(String.self, forKey: .errorMessage)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        finishedAt = try container.decodeIfPresent(Date.self, forKey: .finishedAt)
+        downloadThumbnail = try container.decodeIfPresent(Bool.self, forKey: .downloadThumbnail) ?? false
+        fileSize = try container.decodeIfPresent(Int64.self, forKey: .fileSize)
     }
 
     var displayTitle: String {
         if let title, !title.isEmpty { return title }
         return url
+    }
+
+    var privateDisplayTitle: String {
+        let candidate = displayTitle
+        return candidate.localizedCaseInsensitiveContains("m24") ? "Скачанное видео" : candidate
+    }
+
+    var sourceSummary: String {
+        guard let source = URLValidator.source(from: url) else { return "Источник видео" }
+        return "Источник: \(source.displayName)"
     }
 
     var outputURL: URL? {
@@ -97,6 +150,15 @@ struct HistoryItem: Identifiable, Codable, Equatable {
     var fileExists: Bool {
         guard let outputPath else { return false }
         return FileManager.default.fileExists(atPath: outputPath)
+    }
+
+    var privateDisplayTitle: String {
+        title.localizedCaseInsensitiveContains("m24") ? "Скачанное видео" : title
+    }
+
+    var sourceSummary: String {
+        guard let source = URLValidator.source(from: url) else { return "Источник видео" }
+        return "Источник: \(source.displayName)"
     }
 }
 
@@ -135,7 +197,7 @@ enum Persistence {
             jobs[index].eta = nil
             jobs[index].errorMessage = nil
         }
-        return jobs
+        return jobs.filter { URLValidator.isSupportedVideoURL($0.url) }
     }
 
     static func saveQueue(_ jobs: [DownloadJob]) {
@@ -147,7 +209,7 @@ enum Persistence {
               let items = try? JSONDecoder.appDecoder.decode([HistoryItem].self, from: data) else {
             return []
         }
-        return items
+        return items.filter { URLValidator.isSupportedVideoURL($0.url) }
     }
 
     static func saveHistory(_ items: [HistoryItem]) {

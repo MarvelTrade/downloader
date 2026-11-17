@@ -22,10 +22,10 @@ struct HistoryView: View {
             } else {
                 List(model.history) { item in
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(item.title)
+                        Text(item.privateDisplayTitle)
                             .font(.headline)
                             .lineLimit(2)
-                        Text(item.url)
+                        Text(item.sourceSummary)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)

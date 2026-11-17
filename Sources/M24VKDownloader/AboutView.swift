@@ -9,10 +9,13 @@ struct AboutView: View {
             Image(systemName: "arrow.down.circle.fill")
                 .font(.system(size: 42))
                 .foregroundStyle(.blue)
-            Text("M24VKDownloader \(AppPaths.appVersion)")
+            Text("Загрузчик \(AppPaths.appVersion)")
                 .font(.title2.weight(.semibold))
             Text(HostArchitecture.displayName)
                 .font(.body)
+                .foregroundStyle(.secondary)
+            Text("Автор: Антон Белый")
+                .font(.caption)
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 8) {

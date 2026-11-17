@@ -29,7 +29,7 @@ enum FilenameSanitizer {
         name = name.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if name.isEmpty || name == "." || name == ".." {
-            name = "VK Video"
+            name = "Видео"
         }
 
         if name.count > 180 {
@@ -48,4 +48,5 @@ enum FilenameSanitizer {
         }
         return candidate
     }
+
 }

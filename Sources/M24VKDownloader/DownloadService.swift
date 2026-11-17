@@ -5,6 +5,7 @@ enum DownloadEvent: Sendable {
     case phase(JobStatus)
     case title(String)
     case progress(ProgressSnapshot)
+    case fileSize(Int64)
     case log(String)
 }
 
@@ -14,12 +15,15 @@ enum DownloadService {
         destinationFolder: URL,
         binaries: BinaryLocator.Paths,
         session: CancellableSession,
+        downloadThumbnail: Bool,
         onEvent: @escaping @Sendable (DownloadEvent) -> Void
     ) async throws -> URL {
-        guard URLValidator.isVKVideoURL(videoURL),
+        guard let source = URLValidator.videoSource(from: videoURL),
               let normalized = URLValidator.normalizedURL(from: videoURL) else {
             throw DownloadError.invalidURL
         }
+
+        DebugLog.info("Detected source \(source.displayName) for \(normalized.absoluteString)")
 
         try session.throwIfCancelled()
         try ensureFolderIsWritable(destinationFolder)
@@ -33,13 +37,26 @@ enum DownloadService {
 
         onEvent(.phase(.fetchingInfo))
         onEvent(.status("Получение информации о видео…"))
-        let title = try await fetchTitle(
-            videoURL: normalized.absoluteString,
-            binaries: binaries,
-            workingDirectory: tempDirectory,
-            session: session,
-            onEvent: onEvent
-        )
+        var effectiveVideoURL = normalized.absoluteString
+        var referer: String?
+        let title: String
+        do {
+            title = try await fetchTitle(
+                videoURL: normalized.absoluteString,
+                binaries: binaries,
+                workingDirectory: tempDirectory,
+                session: session,
+                source: source,
+                onEvent: onEvent
+            )
+        } catch {
+            guard source == .ok || source == .m24 else { throw error }
+            let resolved = try await resolveDirectVideo(from: normalized, source: source)
+            effectiveVideoURL = resolved.mediaURL.absoluteString
+            referer = normalized.absoluteString
+            title = resolved.title ?? source.fallbackTitle
+            DebugLog.info("Using direct media fallback for \(source.displayName): \(resolved.mediaURL.absoluteString)")
+        }
         try session.throwIfCancelled()
         onEvent(.title(title))
 
@@ -50,10 +67,13 @@ enum DownloadService {
         onEvent(.phase(.downloading))
         onEvent(.status("Загрузка видео…"))
         let downloadedURL = try await runYTDLPDownload(
-            videoURL: normalized.absoluteString,
+            videoURL: effectiveVideoURL,
             outputURL: tempOutput,
             binaries: binaries,
             session: session,
+            source: source,
+            referer: referer,
+            downloadThumbnail: downloadThumbnail && source != .instagram,
             onEvent: onEvent
         )
         try session.throwIfCancelled()
@@ -76,6 +96,18 @@ enum DownloadService {
             try FileManager.default.removeItem(at: finalURL)
         }
         try FileManager.default.moveItem(at: remuxedURL, to: finalURL)
+
+        if downloadThumbnail, source != .instagram,
+           let thumbnailURL = newestThumbnailFile(in: tempDirectory) {
+            let finalThumbnailURL = finalURL
+                .deletingPathExtension()
+                .appendingPathExtension("jpg")
+            if FileManager.default.fileExists(atPath: finalThumbnailURL.path) {
+                try FileManager.default.removeItem(at: finalThumbnailURL)
+            }
+            try FileManager.default.moveItem(at: thumbnailURL, to: finalThumbnailURL)
+            DebugLog.info("Moved thumbnail to \(finalThumbnailURL.path)")
+        }
         DebugLog.info("Moved finished file to \(finalURL.path)")
         onEvent(.status("Готово"))
         return finalURL
@@ -86,6 +118,7 @@ enum DownloadService {
         binaries: BinaryLocator.Paths,
         workingDirectory: URL,
         session: CancellableSession,
+        source: VideoSource,
         onEvent: @escaping @Sendable (DownloadEvent) -> Void
     ) async throws -> String {
         let arguments = [
@@ -122,7 +155,7 @@ enum DownloadService {
         }
 
         DebugLog.error("yt-dlp returned empty title; using fallback name")
-        return "VK Video"
+        return source.fallbackTitle
     }
 
     private static func runYTDLPDownload(
@@ -130,22 +163,35 @@ enum DownloadService {
         outputURL: URL,
         binaries: BinaryLocator.Paths,
         session: CancellableSession,
+        source: VideoSource,
+        referer: String?,
+        downloadThumbnail: Bool,
         onEvent: @escaping @Sendable (DownloadEvent) -> Void
     ) async throws -> URL {
-        let arguments = [
+        var arguments = [
             "--ignore-config",
             "--no-playlist",
             "--no-color",
             "--newline",
             "--progress",
             "--progress-template", "download:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s",
-            "-f", "bestvideo+bestaudio/best",
+            "-f", formatSelector(for: source),
             "--merge-output-format", "mp4",
             "--ffmpeg-location", binaries.ffmpeg.path,
             "-o", outputURL.path,
-            "--print", "after_move:FILEPATH:%(filepath)s",
-            videoURL
+            "--print", "after_move:FILEPATH:%(filepath)s"
         ]
+
+        if downloadThumbnail {
+            arguments.append(contentsOf: ["--write-thumbnail", "--convert-thumbnails", "jpg"])
+        }
+        if let referer {
+            arguments.append(contentsOf: [
+                "--referer", referer,
+                "--user-agent", "Mozilla/5.0 (Macintosh; Apple Silicon Mac OS X) AppleWebKit/605.1.15 Safari/605.1.15"
+            ])
+        }
+        arguments.append(videoURL)
 
         let detectedPath = StringBox()
 
@@ -193,6 +239,98 @@ enum DownloadService {
         }
 
         throw DownloadError.emptyResult
+    }
+
+    private static func formatSelector(for source: VideoSource) -> String {
+        if source == .youtube {
+            return "bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[vcodec^=avc1]+bestaudio/best[ext=mp4]/bestvideo+bestaudio/best"
+        }
+        return "bestvideo+bestaudio/best"
+    }
+
+    private struct DirectVideo {
+        let mediaURL: URL
+        let title: String?
+    }
+
+    private static func resolveDirectVideo(from pageURL: URL, source: VideoSource) async throws -> DirectVideo {
+        var request = URLRequest(url: pageURL)
+        request.setValue(
+            "Mozilla/5.0 (Macintosh; Apple Silicon Mac OS X) AppleWebKit/605.1.15 Safari/605.1.15",
+            forHTTPHeaderField: "User-Agent"
+        )
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            DebugLog.error("Direct fallback network error for \(source.displayName): \(error.localizedDescription)")
+            throw DownloadError.networkError
+        }
+
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            DebugLog.error("Direct fallback HTTP \(http.statusCode) for \(source.displayName)")
+            throw http.statusCode == 401 || http.statusCode == 403
+                ? DownloadError.authRequired
+                : DownloadError.sourceUnavailable
+        }
+
+        guard let rawHTML = String(data: data, encoding: .utf8) else {
+            throw DownloadError.downloadFailed
+        }
+        let html = decodeEmbeddedHTML(rawHTML)
+        guard let mediaURL = firstMediaURL(in: html) else {
+            DebugLog.error("Direct fallback found no MP4/HLS URL for \(source.displayName)")
+            throw DownloadError.downloadFailed
+        }
+
+        return DirectVideo(mediaURL: mediaURL, title: pageTitle(in: html))
+    }
+
+    private static func decodeEmbeddedHTML(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#34;", with: "\"")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "\\u0026", with: "&")
+            .replacingOccurrences(of: "\\/", with: "/")
+    }
+
+    private static func firstMediaURL(in html: String) -> URL? {
+        let pattern = #"https?://[^\"'<>\\s]+?\.(?:mp4|m3u8)(?:\?[^\"'<>\\s]+)?"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+        let fullRange = NSRange(html.startIndex..<html.endIndex, in: html)
+        let matches = regex.matches(in: html, range: fullRange)
+        let candidates = matches.compactMap { match -> URL? in
+            guard let range = Range(match.range, in: html) else { return nil }
+            return URL(string: String(html[range]))
+        }
+        return candidates.first(where: { $0.pathExtension.lowercased() == "mp4" }) ?? candidates.first
+    }
+
+    private static func pageTitle(in html: String) -> String? {
+        let patterns = [
+            #"<meta[^>]+property=[\"']og:title[\"'][^>]+content=[\"']([^\"']+)[\"']"#,
+            #"<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+property=[\"']og:title[\"']"#,
+            #"<title[^>]*>([^<]+)</title>"#
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+                  let match = regex.firstMatch(
+                    in: html,
+                    range: NSRange(html.startIndex..<html.endIndex, in: html)
+                  ),
+                  match.numberOfRanges > 1,
+                  let range = Range(match.range(at: 1), in: html) else {
+                continue
+            }
+            let title = String(html[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !title.isEmpty { return title }
+        }
+        return nil
     }
 
     private static func handleProgressChunk(
@@ -270,6 +408,25 @@ enum DownloadService {
         return items
             .filter { allowed.contains($0.pathExtension.lowercased()) }
             .filter { $0.deletingPathExtension().lastPathComponent.hasPrefix(baseName) }
+            .sorted { lhs, rhs in
+                let l = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                let r = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+                return l > r
+            }
+            .first
+    }
+
+    private static func newestThumbnailFile(in folder: URL) -> URL? {
+        guard let items = try? FileManager.default.contentsOfDirectory(
+            at: folder,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return nil
+        }
+
+        return items
+            .filter { ["jpg", "jpeg", "png", "webp"].contains($0.pathExtension.lowercased()) }
             .sorted { lhs, rhs in
                 let l = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
                 let r = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast

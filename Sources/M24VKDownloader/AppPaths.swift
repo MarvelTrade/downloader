@@ -1,7 +1,7 @@
 import Foundation
 
 enum AppPaths {
-    static let appVersion = "1.3.0"
+    static let appVersion = "1.6.0"
 
     static var supportDirectory: URL {
         let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!

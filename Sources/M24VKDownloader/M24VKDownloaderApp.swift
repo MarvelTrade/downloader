@@ -13,7 +13,7 @@ struct M24VKDownloaderApp: App {
         }
         .commands {
             CommandGroup(replacing: .appInfo) {
-                Button("About M24VKDownloader") {
+                Button("О загрузчике") {
                     AppDelegate.shared?.showAbout()
                 }
             }
@@ -64,13 +64,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 640),
+            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 780),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "M24 VK Downloader"
-        window.minSize = NSSize(width: 720, height: 560)
+        window.title = "Загрузчик"
+        window.minSize = NSSize(width: 900, height: 680)
         window.contentView = NSHostingView(rootView: ContentView())
         window.isReleasedWhenClosed = false
         window.delegate = self
@@ -106,7 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "About M24VKDownloader"
+        window.title = "О загрузчике"
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: AboutView())
         window.delegate = self

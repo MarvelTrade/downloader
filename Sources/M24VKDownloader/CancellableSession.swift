@@ -4,6 +4,7 @@ import Foundation
 final class CancellableSession: @unchecked Sendable {
     private let lock = NSLock()
     private var processes: [Process] = []
+    private var networkTasks: [URLSessionTask] = []
     private var cancelledFlag = false
 
     var isCancelled: Bool {
@@ -21,13 +22,33 @@ final class CancellableSession: @unchecked Sendable {
         processes.append(process)
     }
 
+    func register(_ task: URLSessionTask) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        if cancelledFlag {
+            task.cancel()
+            throw DownloadError.cancelled
+        }
+        networkTasks.append(task)
+    }
+
+    func unregister(_ task: URLSessionTask) {
+        lock.lock()
+        networkTasks.removeAll { $0 === task }
+        lock.unlock()
+    }
+
     func cancel() {
         lock.lock()
         cancelledFlag = true
         let snapshot = processes
+        let networkSnapshot = networkTasks
         lock.unlock()
         for process in snapshot {
             ProcessKiller.terminateTree(process)
+        }
+        for task in networkSnapshot {
+            task.cancel()
         }
     }
 

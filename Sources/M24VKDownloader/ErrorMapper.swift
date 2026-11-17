@@ -18,11 +18,19 @@ enum ErrorMapper {
         }
 
         if looksLikeAuthRequired(combined) {
-            return .vkAuthRequired
+            return .authRequired
         }
 
         if looksLikeInvalidURL(combined) {
             return .invalidURL
+        }
+
+        if looksLikeNetworkError(combined) {
+            return .networkError
+        }
+
+        if looksLikeSourceUnavailable(combined) {
+            return .sourceUnavailable
         }
 
         if looksLikeUnavailable(combined) {
@@ -62,7 +70,7 @@ enum ErrorMapper {
             || text.contains("auth required")
             || text.contains("only available for registered")
             || text.contains("please log in")
-            || text.contains("cookies") && text.contains("vk")
+            || text.contains("cookies") && (text.contains("login") || text.contains("sign in"))
             || text.contains("captcha")
             || text.contains("access denied") && text.contains("login")
     }
@@ -84,5 +92,23 @@ enum ErrorMapper {
             || text.contains("http error 404")
             || text.contains("http error 410")
             || text.contains("unable to extract")
+    }
+
+    private static func looksLikeNetworkError(_ text: String) -> Bool {
+        text.contains("network is unreachable")
+            || text.contains("connection reset")
+            || text.contains("connection refused")
+            || text.contains("timed out")
+            || text.contains("temporary failure in name resolution")
+            || text.contains("could not resolve host")
+    }
+
+    private static func looksLikeSourceUnavailable(_ text: String) -> Bool {
+        text.contains("http error 429")
+            || text.contains("http error 500")
+            || text.contains("http error 502")
+            || text.contains("http error 503")
+            || text.contains("http error 504")
+            || text.contains("service unavailable")
     }
 }
